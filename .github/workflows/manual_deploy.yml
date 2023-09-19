@@ -1,0 +1,58 @@
+name: "Manual Deploy"
+
+on: workflow_dispatch
+
+env:
+  BUCKET_NAME : ${{ secrets.S3_BUCKET_NAME }}
+  AWS_REGION : ${{ secrets.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ secrets.AWS_OIDC_IAM_ROLE_ARN }}
+  SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+  SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build_and_push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Build
+        uses: addnab/docker-run-action@v3
+        with:
+          image: squidfunk/mkdocs-material:latest
+          options: -v ${{ github.workspace }}:/docs
+          run: mkdocs build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync html to s3
+        run: |
+          aws s3 sync ./site s3://${{ env.BUCKET_NAME }}/ --delete --quiet
+
+      - name: Slack Notification on Success
+        if: success()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_CHANNEL: ${{ env.SLACK_CHANNEL_ID }}
+          SLACK_TITLE: MKDocs - Manual Deploy job Success
+          SLACK_COLOR: good
+          SLACK_MESSAGE: Successfully executed the Manual Deploy job.
+          SLACK_USERNAME: MKDocs - Manual Deploy job Success
+
+      - name: Slack Notification on Failure
+        uses: rtCamp/action-slack-notify@v2
+        if: failure()
+        env:
+          SLACK_CHANNEL: ${{ env.SLACK_CHANNEL_ID }}
+          SLACK_TITLE: MKDocs - Manual Deploy job Failure
+          SLACK_COLOR: danger
+          SLACK_MESSAGE: <!channel> The Manual Deploy job failed to execute.
+          SLACK_USERNAME: MKDocs - Manual Deploy job Failure
